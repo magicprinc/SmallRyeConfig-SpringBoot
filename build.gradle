@@ -219,13 +219,19 @@ jib {
 	}
 }
 
-tasks.register('runBootJar', JavaExec) {
+tasks.register('runBootJar', Exec) {
 	dependsOn bootJar // build the jar
 	group = 'application'
 	description = 'Runs the application.jar'
-	mainClass = 'fink.demo.smallryeconfigspringboot.ExampleApplication'
-	classpath = sourceSets.main.runtimeClasspath
-	standardInput = System.in
-	workingDir = project.projectDir
-	args = []
+
+	// Specify the executable file to run
+	executable 'java'
+
+	// Optionally, specify arguments to pass to the executable
+	args '-jar', 'build/libs/SmallRyeConfig-SpringBoot-1.0.jar'
+
+	// Optionally, set the working directory for the process
+	// workingDir 'path/to/working/directory'
+	// Optionally, set environment variables for the process
+	// environment 'ENV_VAR_NAME', 'value'
 }
