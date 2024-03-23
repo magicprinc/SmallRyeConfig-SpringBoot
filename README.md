@@ -10,3 +10,7 @@ $ ./gradlew runBootJar
 
 Branch `main` shows the bug in `SmallRye Common Classloader`.
 Branch `fix` shows the fixed version.
+
+See also
+https://github.com/smallrye/smallrye-config
+https://github.com/smallrye/smallrye-common

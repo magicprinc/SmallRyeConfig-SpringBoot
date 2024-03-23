@@ -1,4 +1,4 @@
-package fink.demo.smallryeconfigspringboot;
+package fink.config.spring;
 
 import com.google.common.base.Splitter;
 import io.smallrye.config.DotEnvConfigSourceProvider;
@@ -8,11 +8,16 @@ import io.smallrye.config.SmallRyeConfigBuilder;
 import io.smallrye.config.source.yaml.YamlConfigSourceProvider;
 import io.smallrye.config.validator.BeanValidationConfigValidatorImpl;
 import lombok.extern.slf4j.Slf4j;
-import lombok.val;
 import org.eclipse.microprofile.config.spi.ConfigSource;
+import org.springframework.beans.BeansException;
+import org.springframework.beans.factory.BeanFactoryUtils;
+import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
+import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
+import org.springframework.core.PriorityOrdered;
+import org.springframework.core.env.ConfigurableEnvironment;
 
 import java.nio.charset.Charset;
 import java.text.DateFormat;
@@ -21,18 +26,28 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
+ 1. Register "smallRyeConfig" bean (it can be injected)
+ 2. Add SpringSmallRyeConfigPropertySource to all ConfigurableEnvironment in Spring Context
+ 		(All SmallRyeConfig properties are accessible trough Environment and @Value)
+
+ For raw/core Spring: register this class as bean "manually"
+
  @see SmallRyeConfig
  @see SmallRyeConfigBuilder
  */
 @Configuration(proxyBeanMethods = false)
 @Slf4j
-public class SmallRyeConfigAutoConf {
+public class SmallRyeConfigAutoConf implements PriorityOrdered, BeanFactoryPostProcessor {
+	@Override
+	public int getOrder () {
+		return HIGHEST_PRECEDENCE;
+	}
 
-	@Bean
-	@Primary
-	public static SmallRyeConfig smallRyeConfig (){
+	private static final SmallRyeConfig config;
+	static {
 		SmallRyeConfigBuilder builder = new SmallRyeConfigBuilder()
 				.addDefaultInterceptors()// e.g. io.smallrye.config.ExpressionConfigSourceInterceptor
 				.addDefaultSources()// EnvConfigSource, SysPropConfigSource, SmallRyeConfigBuilder#META_INF_MICROPROFILE_CONFIG_PROPERTIES = META-INF/microprofile-config.properties
@@ -49,7 +64,7 @@ public class SmallRyeConfigAutoConf {
 				// YAML (supports json with .yaml extension)
 				.withSources(new YamlConfigSourceProvider(){// (110)
 					@Override public Iterable<ConfigSource> getConfigSources (ClassLoader cl){
-						val sources = new ArrayList<ConfigSource>(8);
+						var sources = new ArrayList<ConfigSource>(8);
 						sources.addAll(loadConfigSources(new String[]{"config/application.yaml", "config/application.yml"}, 266, cl));
 						sources.addAll(loadConfigSources(new String[]{"application.yaml", "application.yml"}, 256, cl));
 						sources.addAll(loadConfigSources(new String[]{"application-test.yaml", "application-test.yml"}, 316, cl));
@@ -72,12 +87,12 @@ public class SmallRyeConfigAutoConf {
 						List<String> elements = Splitter.on('_').limit(3).trimResults().splitToList(s);
 						return elements.size() == 1 ? new Locale(elements.get(0))
 								: elements.size() == 2 ? new Locale(elements.get(0), elements.get(1))
-										: new Locale(elements.get(0), elements.get(1), elements.get(2));
+								: new Locale(elements.get(0), elements.get(1), elements.get(2));
 					}
 				})
 				.withValidateUnknown(false)// allow extra unmapped properties
-				//.withMappingDefaults(true) ??? 👨‍💻
-		    ;
+		//.withMappingDefaults(true) ??? 👨‍💻
+		;
 
 		try {
 			var validator = new BeanValidationConfigValidatorImpl();
@@ -87,12 +102,37 @@ public class SmallRyeConfigAutoConf {
 			// NoClassDefFoundError: jakarta/validation/Validation
 			LOGGER.info("microprofile-config: No BeanValidation available in ClassPath: {}", e.toString());
 		}
-		return builder.build();
+		config = builder.build();
+	}
+
+	@Bean
+	@Primary
+	public static SmallRyeConfig smallRyeConfig (){
+		return config;
 	}
 
 	public static ClassLoader getClassLoader (){
 		var cl = Thread.currentThread().getContextClassLoader();
 		return cl != null ? cl    // <^ ~ Objects.requireNonNullElseGet
 				: SmallRyeConfigAutoConf.class.getClassLoader();
+	}
+
+	/**
+	 Spring is huge. If you know a better way for raw/core Spring, please, open an issue or send me a message. 🙏
+
+	 For Spring Boot there is {@link org.springframework.boot.env.EnvironmentPostProcessor}
+	 */
+	@Override
+	public void postProcessBeanFactory (ConfigurableListableBeanFactory beanFactory) throws BeansException {
+		var ps = new SpringSmallRyeConfigPropertySource(config);
+
+		Map<String,ConfigurableEnvironment> envs = BeanFactoryUtils.beansOfTypeIncludingAncestors(beanFactory, ConfigurableEnvironment.class);
+		for (var env : envs.values()) {
+			if (!env.getPropertySources().contains(SpringSmallRyeConfigPropertySource.NAME)) {
+				env.getPropertySources()
+						.addLast(ps);
+				LOGGER.debug("ConfigurableEnvironment with SpringSmallRyeConfigPropertySource: {}", env);
+			}
+		}
 	}
 }
