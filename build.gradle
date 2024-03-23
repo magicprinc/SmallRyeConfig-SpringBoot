@@ -36,7 +36,7 @@ dependencies {
 	implementation(libs.bundles.smallryeConfig)
 
 	//!!! quick fix STEP 1: add fix classes
-	//implementation('com.github.magicprinc:smallrye-common-classloader-fix:2.3.3')
+	implementation('com.github.magicprinc:smallrye-common-classloader-fix:2.3.3')
 
   //*** TEST TEST TEST TEST TEST ***
   testImplementation(libs.bundles.junit)
@@ -50,7 +50,7 @@ configurations.configureEach {
   exclude group: 'io.vertx', module: 'vertx-ignite'
 
 	//!!! quick fix STEP 2: remove original smallrye-common-classloader and use fix instead
-	// exclude group: "io.smallrye.common", module: "smallrye-common-classloader"
+	exclude group: "io.smallrye.common", module: "smallrye-common-classloader"
 }
 
 dependencyManagement {
