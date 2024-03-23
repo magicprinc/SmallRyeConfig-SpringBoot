@@ -1,0 +1,231 @@
+plugins {
+  id 'java'
+  id 'idea'
+
+	alias(libs.plugins.spring.dependencyManagement)
+	alias(libs.plugins.spring.boot)
+	id("com.google.cloud.tools.jib") version "latest.release" // gradle jibBuildTar + docker load --input build/jib-image.tar
+
+	alias(libs.plugins.lombok)
+	alias(libs.plugins.sonarlint)
+	alias(libs.plugins.errorprone)
+	alias(libs.plugins.versions)
+	alias(libs.plugins.gradleGitProperties)
+
+}
+println "[INFO] ${project.group}:${project.name}:$version  ⇒  ${tasks.jar.archiveFileName.get()} # JVM: ${System.getProperty("java.version")}  Gradle: ${gradle.gradleVersion}"
+
+repositories {
+  mavenLocal()
+  mavenCentral {
+    mavenContent { releasesOnly() }
+  }
+	maven { url 'https://jitpack.io' } // load libraries from github*: to apply smallrye-common-classloader fix
+}
+
+dependencies {
+	errorprone("com.google.errorprone:error_prone_core:latest.release") //+plugin: id("net.ltgt.errorprone") version "latest.release"
+	implementation(libs.bundles.coreAnnotation)
+  implementation 'org.springframework.boot:spring-boot-starter-actuator'
+  implementation 'org.springframework.boot:spring-boot-starter-web'
+
+  implementation(libs.slf4jApi)
+  implementation(libs.logback)
+	implementation(libs.guava)
+
+	implementation(libs.bundles.smallryeConfig)
+
+	//!!! quick fix STEP 1: add fix classes
+	//implementation('com.github.magicprinc:smallrye-common-classloader-fix:2.3.3')
+
+  //*** TEST TEST TEST TEST TEST ***
+  testImplementation(libs.bundles.junit)
+}
+configurations.configureEach {
+	exclude group: "commons-logging", module: "commons-logging"
+	exclude group: "org.apache.logging.log4j", module: "log4j-api"
+	exclude group: "org.apache.logging.log4j", module: "log4j-to-slf4j"
+	exclude group: "org.jboss.slf4j", module: "slf4j-jboss-logmanager"
+  exclude group: 'io.vertx', module: 'vertx-stack-depchain'
+  exclude group: 'io.vertx', module: 'vertx-ignite'
+
+	//!!! quick fix STEP 2: remove original smallrye-common-classloader and use fix instead
+	// exclude group: "io.smallrye.common", module: "smallrye-common-classloader"
+}
+
+dependencyManagement {
+	imports {
+		mavenBom org.springframework.boot.gradle.plugin.SpringBootPlugin.BOM_COORDINATES
+	}
+}
+
+jar { enabled = false }
+
+tasks.withType(JavaCompile).configureEach {
+	options.encoding = 'UTF-8' // = compileJava.options.encoding = "UTF-8"
+	options.compilerArgs.addAll(['-Xlint:all,-serial', '-parameters', '-g', '-Xmaxwarns', '999'])
+	options.release.set(17) // javac --release 7..19+
+	options.deprecation = true
+
+	options.errorprone {
+		enabled = true  // <<<!!! You can disable Error-Prone here!
+		disableWarningsInGeneratedCode = true
+		excludedPaths = ".*/build/gen.*/.*"
+		disable("UnusedVariable")
+		disable("MissingSummary")
+		errorproneArgs = ["-XepExcludedPaths:.*/test/.*"]
+	}
+}
+
+lombok { version = 'latest.release'; }
+idea { module { downloadJavadoc = true; downloadSources = true } }
+sonarLint { ignoreFailures = true; }
+
+tasks.withType(AbstractArchiveTask).configureEach {
+	preserveFileTimestamps = false
+	reproducibleFileOrder = true
+}
+
+tasks.register('setupIdea', Copy) {
+	from project.projectDir.absolutePath + '/build/resources/main/git.properties'
+	into project.projectDir.absolutePath + '/out/production/resources'
+	doLast {
+		def f = new File(project.projectDir.absolutePath + "/out/production/resources/git.properties")
+		println "git: ${f} ${f.isFile()}"
+	}
+	dependsOn generateGitProperties
+}
+
+test { //or: tasks.named('test'){ or: tasks.withType(Test).configureEach // https://docs.gradle.org/current/dsl/org.gradle.api.tasks.testing.Test.html
+	dependsOn jar // gradle flaky bug
+	useJUnitPlatform()
+	testLogging {
+		// events "passed", "skipped", "failed" // PASSED, SKIPPED, FAILED
+		showStandardStreams = true // show standard out & err of the test JVM on the console
+		showExceptions = true
+		exceptionFormat = 'full'
+	}
+	maxHeapSize = "1G"
+	enableAssertions = true
+
+	testLogging.showStandardStreams = true // show standard out & err of the test JVM on the console
+
+	systemProperty("file.encoding", "UTF-8")
+	systemProperty("user.timezone", System.getProperty("user.timezone"))
+	systemProperty("user.language", System.getProperty("user.language"))
+
+	jvmArgs += [
+			'-XX:+EnableDynamicAgentLoading',
+			'-showversion',
+			'-XX:ActiveProcessorCount=64',
+			'-Djdk.virtualThreadScheduler.parallelism=128',
+			'-Djdk.tracePinnedThreads=full',
+			'-XX:+UseParallelGC',
+			'-XX:+HeapDumpOnOutOfMemoryError',
+			'-XX:+UseCompressedOops',
+			'-XX:-OmitStackTraceInFastThrow',
+			'-Djava.net.preferIPv4Stack=true',
+			'-XX:+DoEscapeAnalysis',
+			'-XX:CompileCommand=inline,java/lang/String.charAt',
+			'--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED',
+			'--add-opens=java.base/sun.nio.ch=ALL-UNNAMED',
+			'--add-opens=java.management/com.sun.jmx.mbeanserver=ALL-UNNAMED',
+			'--add-opens=jdk.internal.jvmstat/sun.jvmstat.monitor=ALL-UNNAMED',
+			'--add-opens=java.base/sun.reflect.generics.reflectiveObjects=ALL-UNNAMED',
+			'--add-opens=jdk.management/com.sun.management.internal=ALL-UNNAMED',
+			'--add-opens=java.base/java.io=ALL-UNNAMED',
+			'--add-opens=java.base/java.nio=ALL-UNNAMED',
+			'--add-opens=java.base/java.util=ALL-UNNAMED',
+			'--add-opens=java.base/java.util.concurrent=ALL-UNNAMED',
+			'--add-opens=java.base/java.util.concurrent.locks=ALL-UNNAMED',
+			'--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED',
+			'--add-opens=java.base/java.lang=ALL-UNNAMED',
+			'--add-opens=java.base/java.lang.invoke=ALL-UNNAMED',
+			'--add-opens=java.base/java.math=ALL-UNNAMED',
+			'--add-opens=java.sql/java.sql=ALL-UNNAMED',
+			'--add-opens=java.base/java.net=ALL-UNNAMED'
+	]
+
+	// gradle -Dmy.sys.prop=value doesn't go into my.sys.prop=value in (forked) test. Lifehack: -D&my.sys.prop=5
+	for (entry in System.getProperties()){
+		if (entry.key.toString().startsWith("&")){
+			options { systemProperty(entry.key.toString().substring(1), entry.value) }
+		}
+	}
+	// multi-project behavior stabilization (in any case run in the project's dir)
+	workingDir project.projectDir // Set the working directory to the subproject directory e.g. multiModuleRoot/someProject
+	systemProperty("user.dir", project.projectDir) // just to be sure ^
+	println "[INFO] Test JVM: ${getJavaVersion()} = ${getExecutable()==null ? org.gradle.internal.jvm.Jvm.current().getJavaExecutable().getAbsolutePath() : getExecutable()}"
+	try { println "[INFO] Test JVM: ${javaLauncher.get().executablePath} = ${javaLauncher.get().metadata.getJvmVersion()}" } catch (Throwable ignore){}
+	println "[INFO] ${project.name}.workingDir = $workingDir\n${"*".repeat(120)}"
+}
+
+jib {
+	from {
+		// bellsoft/liberica-openjdk-alpine:21.0.2-cds ~ 180 MB × MUSL
+		image = 'bellsoft/liberica-runtime-container:jdk-all-21.0.2-cds-slim-musl' // ~ 267 MB
+	}
+	to {
+		image = 'example-app'
+	}
+	container {
+		ports = ['31039']
+		jvmFlags += [
+			'-showversion',
+			'-Xms1g',
+			'-Xmx1g',
+			'-XX:ActiveProcessorCount=4',
+			'-Djdk.tracePinnedThreads=full',
+			'-XX:+EnableDynamicAgentLoading',
+			'-XX:+UseParallelGC',
+			'-XX:+HeapDumpOnOutOfMemoryError',
+			'-XX:+UseCompressedOops',
+			'-XX:-OmitStackTraceInFastThrow',
+			'-Djava.net.preferIPv4Stack=true',
+			'-Dfile.encoding=UTF-8',
+			'-XX:+DoEscapeAnalysis',
+			'-XX:CompileCommand=inline,java/lang/String.charAt',
+			'--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED',
+			'--add-opens=java.base/sun.nio.ch=ALL-UNNAMED',
+			'--add-opens=java.management/com.sun.jmx.mbeanserver=ALL-UNNAMED',
+			'--add-opens=jdk.internal.jvmstat/sun.jvmstat.monitor=ALL-UNNAMED',
+			'--add-opens=java.base/sun.reflect.generics.reflectiveObjects=ALL-UNNAMED',
+			'--add-opens=jdk.management/com.sun.management.internal=ALL-UNNAMED',
+			'--add-opens=java.base/java.io=ALL-UNNAMED',
+			'--add-opens=java.base/java.nio=ALL-UNNAMED',
+			'--add-opens=java.base/java.util=ALL-UNNAMED',
+			'--add-opens=java.base/java.util.concurrent=ALL-UNNAMED',
+			'--add-opens=java.base/java.util.concurrent.locks=ALL-UNNAMED',
+			'--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED',
+			'--add-opens=java.base/java.lang=ALL-UNNAMED',
+			'--add-opens=java.base/java.lang.invoke=ALL-UNNAMED',
+			'--add-opens=java.base/java.math=ALL-UNNAMED',
+			'--add-opens=java.sql/java.sql=ALL-UNNAMED',
+			'--add-opens=java.base/java.net=ALL-UNNAMED',
+			'--add-opens=java.base/java.lang.reflect=ALL-UNNAMED',
+			'--add-opens=java.base/java.time=ALL-UNNAMED',
+			'--add-opens=java.base/java.text=ALL-UNNAMED',
+			'--add-opens=java.management/sun.management=ALL-UNNAMED',
+			'--add-opens=java.desktop/java.awt.font=ALL-UNNAMED',
+		]
+
+		def env = Map.of(
+				'SPRING_JMX_ENABLED','true',
+				'SPRING_MAIN_BANNER_MODE','off',
+				'SPRING_OUTPUT_ANSI_ENABLED','NEVER',
+				'SPRING_CLOUD_CONFIG_ENABLED','false'
+		)// SPRING_CONFIG_LOCATION = file:/etc/service/application.properties ?
+		environment = env
+	}
+}
+
+tasks.register('runBootJar', JavaExec) {
+	dependsOn bootJar // build the jar
+	group = 'application'
+	description = 'Runs the application.jar'
+	mainClass = 'fink.demo.smallryeconfigspringboot.ExampleApplication'
+	classpath = sourceSets.main.runtimeClasspath
+	standardInput = System.in
+	workingDir = project.projectDir
+	args = []
+}
