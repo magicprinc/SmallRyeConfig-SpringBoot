@@ -1,6 +1,7 @@
 package fink.demo.smallryeconfigspringboot;
 
 import com.google.common.base.Verify;
+import fink.config.spring.SmallRyeConfigAutoConf;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
