@@ -8,5 +8,5 @@ or if you don't have Gradle installed
 $ ./gradlew runBootJar
 ```
 
-Branch `main` show the bug in `SmallRye Common Classloader`.
-Branch `fix` show the fixed version.
+Branch `main` shows the bug in `SmallRye Common Classloader`.
+Branch `fix` shows the fixed version.
