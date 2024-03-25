@@ -48,7 +48,7 @@ public class ClassPathUtils {
      * @throws IOException in case of an IO failure
      */
     public static void consumeAsStreams(ClassLoader cl, String resource, Consumer<InputStream> consumer) throws IOException {
-        final Enumeration<URL> resources = cl.getResources(resource);
+        final Enumeration<URL> resources = cl == null ? ClassLoader.getSystemResources(resource) : cl.getResources(resource);
         while (resources.hasMoreElements()) {
             consumeStream(resources.nextElement(), consumer);
         }
@@ -81,7 +81,7 @@ public class ClassPathUtils {
      * @throws IOException in case of an IO failure
      */
     public static void consumeAsPaths(ClassLoader cl, String resource, Consumer<Path> consumer) throws IOException {
-        final Enumeration<URL> resources = cl.getResources(resource);
+        final Enumeration<URL> resources = cl == null ? ClassLoader.getSystemResources(resource) : cl.getResources(resource);
         while (resources.hasMoreElements()) {
             consumeAsPath(resources.nextElement(), consumer);
         }
@@ -130,25 +130,20 @@ public class ClassPathUtils {
 
             final String file = url.getFile();
             final int exclam = file.indexOf('!');
+            final Path jar;
             try {
-                URL fileUrl;
-                Path jarPath;
-                String subPath;
-                if (exclam == -1) {
-                    // assume the first element is a JAR file, not a plain file, since it was a `jar:` URL
-                    fileUrl = new URL(file);
-                    subPath = "/";
-                } else {
-                    fileUrl = new URL(file.substring(0, exclam));
-                    subPath = file.substring(exclam + 1);
-                }
-                if (!fileUrl.getProtocol().equals("file")) {
-                    throw new IllegalArgumentException("Sub-URL of JAR URL is expected to have a scheme of `file`");
-                }
-                jarPath = toLocalPath(fileUrl);
-                return processAsJarPath(jarPath, subPath, function);
+                jar = toLocalPath(exclam >= 0 ? new URL(file.substring(0, exclam)) : url);
             } catch (MalformedURLException e) {
                 throw new RuntimeException("Failed to create a URL for '" + file.substring(0, exclam) + "'", e);
+            }
+            try (FileSystem jarFs = FileSystems.newFileSystem(jar, (ClassLoader) null)) {
+                Path localPath = jarFs.getPath("/");
+                if (exclam >= 0) {
+                    localPath = localPath.resolve(file.substring(exclam + 1));
+                }
+                return function.apply(localPath);
+            } catch (IOException e) {
+                throw new UncheckedIOException("Failed to read " + jar, e);
             }
         }
 
@@ -157,20 +152,6 @@ public class ClassPathUtils {
         }
 
         throw new IllegalArgumentException("Unexpected protocol " + url.getProtocol() + " for URL " + url);
-    }
-
-    private static <R> R processAsJarPath(Path jarPath, String path, Function<Path, R> function) {
-        try (FileSystem jarFs = FileSystems.newFileSystem(jarPath, (ClassLoader) null)) {
-            Path localPath = jarFs.getPath("/");
-            int idx = path.indexOf('!');
-            if (idx == -1) {
-                return function.apply(localPath.resolve(path));
-            } else {
-                return processAsJarPath(localPath.resolve(path.substring(0, idx)), path.substring(idx + 1), function);
-            }
-        } catch (IOException e) {
-            throw new UncheckedIOException("Failed to read " + jarPath, e);
-        }
     }
 
     /**
