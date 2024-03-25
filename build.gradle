@@ -50,7 +50,7 @@ configurations.configureEach {
   exclude group: 'io.vertx', module: 'vertx-ignite'
 
 	//!!! quick fix STEP 2: remove original smallrye-common-classloader and use fix instead
-	// exclude group: "io.smallrye.common", module: "smallrye-common-classloader"
+	exclude group: "io.smallrye.common", module: "smallrye-common-classloader"
 }
 
 dependencyManagement {
